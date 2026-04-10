@@ -1,0 +1,102 @@
+title: Oxide Stage 2 IsDebuggerPresent API Call
+id: d3e4f5a6-7b8c-9d0e-1f2a-3b4c5d6e7f8a
+status: experimental
+description: |
+  Detects calls to IsDebuggerPresent API, commonly used by malware
+  to detect if it's running under a debugger.
+references:
+  - https://github.com/diemoeve/oxide-loader
+  - https://anti-debug.checkpoint.com/techniques/debug-flags.html
+author: diemoeve
+date: 2026/04/10
+tags:
+  - attack.defense_evasion
+  - attack.t1497.001  # Virtualization/Sandbox Evasion: System Checks
+  - attack.t1622      # Debugger Evasion
+logsource:
+  category: api_call
+  product: windows
+detection:
+  selection:
+    ApiCall: 'IsDebuggerPresent'
+  filter_known:
+    Image|endswith:
+      - '\devenv.exe'
+      - '\code.exe'
+      - '\windbg.exe'
+      - '\ollydbg.exe'
+      - '\x64dbg.exe'
+  condition: selection and not filter_known
+fields:
+  - Image
+  - User
+  - ProcessId
+falsepositives:
+  - Legitimate applications with anti-debugging protection
+  - Security software
+level: medium
+---
+title: Oxide Stage 2 NtQueryInformationProcess Debug Check
+id: e4f5a6b7-8c9d-0e1f-2a3b-4c5d6e7f8a9b
+status: experimental
+description: |
+  Detects NtQueryInformationProcess calls with ProcessDebugPort class,
+  used to detect debugger attachment via debug port check.
+references:
+  - https://github.com/diemoeve/oxide-loader
+  - https://anti-debug.checkpoint.com/techniques/debug-flags.html
+author: diemoeve
+date: 2026/04/10
+tags:
+  - attack.defense_evasion
+  - attack.t1622
+logsource:
+  category: api_call
+  product: windows
+detection:
+  selection:
+    ApiCall: 'NtQueryInformationProcess'
+    ProcessInformationClass: 7  # ProcessDebugPort
+  condition: selection
+fields:
+  - Image
+  - ProcessId
+  - User
+falsepositives:
+  - Security software checking process state
+  - Anti-cheat software
+level: high
+---
+title: Oxide Stage 2 Multiple Anti-Debug Checks
+id: f5a6b7c8-9d0e-1f2a-3b4c-5d6e7f8a9b0c
+status: experimental
+description: |
+  Detects multiple anti-debugging API calls from the same process,
+  which is highly indicative of malware attempting to evade analysis.
+references:
+  - https://github.com/diemoeve/oxide-loader
+author: diemoeve
+date: 2026/04/10
+tags:
+  - attack.defense_evasion
+  - attack.t1622
+logsource:
+  category: api_call
+  product: windows
+detection:
+  selection:
+    ApiCall:
+      - 'IsDebuggerPresent'
+      - 'CheckRemoteDebuggerPresent'
+      - 'NtQueryInformationProcess'
+      - 'OutputDebugStringA'
+      - 'OutputDebugStringW'
+  timeframe: 10s
+  condition: selection | count(ApiCall) by Image > 2
+fields:
+  - Image
+  - ApiCall
+  - User
+falsepositives:
+  - Software with extensive anti-tampering protection
+level: high

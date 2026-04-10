@@ -1,0 +1,106 @@
+title: Oxide Stage 1 Staging Fetch Request
+id: e8f3a5b2-4c1d-4e9f-a8b7-6c2d1e3f4a5b
+status: experimental
+description: |
+  Detects HTTP requests to /api/staging/ endpoint which is used by
+  Oxide Stage 1 loader to fetch encrypted Stage 2 payloads.
+references:
+  - https://github.com/diemoeve/oxide-loader
+author: diemoeve
+date: 2026/04/10
+tags:
+  - attack.command_and_control
+  - attack.t1071.001  # Web Protocols
+  - attack.t1105      # Ingress Tool Transfer
+logsource:
+  category: proxy
+  product: any
+detection:
+  selection_url:
+    c-uri|contains: '/api/staging/'
+  selection_method:
+    cs-method: 'GET'
+  condition: selection_url and selection_method
+fields:
+  - c-ip
+  - cs-host
+  - c-uri
+  - cs-user-agent
+  - sc-status
+falsepositives:
+  - Legitimate applications using similar API path (unlikely)
+level: high
+---
+title: Oxide Stage 1 User-Agent Detection
+id: f9a4b6c3-5d2e-4f0a-b9c8-7d3e2f4a5b6c
+status: experimental
+description: |
+  Detects the default User-Agent string used by Oxide Stage 1 loader.
+  Note: This UA is intentionally generic and may produce false positives.
+  Combine with staging URL detection for higher confidence.
+references:
+  - https://github.com/diemoeve/oxide-loader
+author: diemoeve
+date: 2026/04/10
+tags:
+  - attack.command_and_control
+  - attack.t1071.001
+logsource:
+  category: proxy
+  product: any
+detection:
+  selection_ua:
+    cs-user-agent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'
+  selection_staging:
+    c-uri|contains: '/api/staging/'
+  condition: selection_ua and selection_staging
+fields:
+  - c-ip
+  - cs-host
+  - c-uri
+falsepositives:
+  - Many applications use similar generic User-Agent strings
+level: medium
+---
+title: Oxide Stage 1 Sysmon Network Connection
+id: a1b2c3d4-5e6f-7a8b-9c0d-1e2f3a4b5c6d
+status: experimental
+description: |
+  Detects network connections from suspicious executables to staging endpoints.
+  Correlate with process creation events for full context.
+references:
+  - https://github.com/diemoeve/oxide-loader
+author: diemoeve
+date: 2026/04/10
+tags:
+  - attack.command_and_control
+  - attack.t1071.001
+  - attack.t1105
+logsource:
+  category: network_connection
+  product: windows
+detection:
+  selection:
+    Initiated: 'true'
+    DestinationPort:
+      - 80
+      - 443
+      - 8080
+      - 4444
+  filter_known:
+    Image|endswith:
+      - '\chrome.exe'
+      - '\firefox.exe'
+      - '\msedge.exe'
+      - '\svchost.exe'
+  filter_signed:
+    ImageSigned: 'true'
+  condition: selection and not (filter_known or filter_signed)
+fields:
+  - Image
+  - DestinationIp
+  - DestinationPort
+  - User
+falsepositives:
+  - Unsigned legitimate applications making HTTP connections
+level: low

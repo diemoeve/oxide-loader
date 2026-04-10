@@ -1,0 +1,81 @@
+title: Oxide Stage 2 VM Detection Registry Access
+id: b1c2d3e4-5f6a-7b8c-9d0e-1f2a3b4c5d6e
+status: experimental
+description: |
+  Detects registry access to VM-related keys commonly checked by malware
+  to detect virtualized environments. Stage 2 checks VirtualBox, VMware,
+  and Hyper-V registry keys.
+references:
+  - https://github.com/diemoeve/oxide-loader
+  - https://evasions.checkpoint.com/techniques/registry.html
+author: diemoeve
+date: 2026/04/10
+tags:
+  - attack.defense_evasion
+  - attack.t1497.001  # Virtualization/Sandbox Evasion: System Checks
+  - attack.t1012      # Query Registry
+logsource:
+  category: registry_access
+  product: windows
+detection:
+  selection_virtualbox:
+    TargetObject|contains:
+      - '\SOFTWARE\Oracle\VirtualBox Guest Additions'
+      - '\SYSTEM\CurrentControlSet\Services\VBoxGuest'
+      - '\SYSTEM\CurrentControlSet\Services\VBoxMouse'
+      - '\SYSTEM\CurrentControlSet\Services\VBoxSF'
+      - '\SYSTEM\CurrentControlSet\Services\VBoxVideo'
+  selection_vmware:
+    TargetObject|contains:
+      - '\SOFTWARE\VMware, Inc.\VMware Tools'
+      - '\SYSTEM\CurrentControlSet\Services\vmci'
+      - '\SYSTEM\CurrentControlSet\Services\vmhgfs'
+      - '\SYSTEM\CurrentControlSet\Services\vmmouse'
+  selection_hyperv:
+    TargetObject|contains:
+      - '\SOFTWARE\Microsoft\Virtual Machine\Guest\Parameters'
+  condition: selection_virtualbox or selection_vmware or selection_hyperv
+fields:
+  - Image
+  - TargetObject
+  - EventType
+  - User
+falsepositives:
+  - Legitimate VM management software
+  - System administrators checking VM status
+level: medium
+---
+title: Oxide Stage 2 Multiple VM Registry Checks
+id: c2d3e4f5-6a7b-8c9d-0e1f-2a3b4c5d6e7f
+status: experimental
+description: |
+  Detects multiple VM-related registry accesses from the same process,
+  which is highly suspicious and indicative of VM detection behavior.
+references:
+  - https://github.com/diemoeve/oxide-loader
+author: diemoeve
+date: 2026/04/10
+tags:
+  - attack.defense_evasion
+  - attack.t1497.001
+logsource:
+  category: registry_access
+  product: windows
+detection:
+  selection:
+    TargetObject|contains:
+      - 'VirtualBox'
+      - 'VMware'
+      - 'Virtual Machine'
+      - 'VBox'
+      - 'vmci'
+      - 'vmhgfs'
+  timeframe: 5s
+  condition: selection | count(TargetObject) by Image > 3
+fields:
+  - Image
+  - TargetObject
+  - User
+falsepositives:
+  - Legitimate security software scanning for VM artifacts
+level: high

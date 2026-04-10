@@ -1,0 +1,178 @@
+title: Oxide Stage 3 CreateRemoteThread Injection
+id: e1f2a3b4-c5d6-e7f8-a9b0-c1d2e3f4a5b6
+status: experimental
+description: |
+  Detects CreateRemoteThread calls from unsigned executables targeting
+  explorer.exe, which is the default injection target for Stage 3.
+references:
+  - https://github.com/diemoeve/oxide-loader
+  - https://attack.mitre.org/techniques/T1055/002/
+author: diemoeve
+date: 2026/04/10
+tags:
+  - attack.defense_evasion
+  - attack.privilege_escalation
+  - attack.t1055.002  # Portable Executable Injection
+logsource:
+  category: create_remote_thread
+  product: windows
+detection:
+  selection:
+    TargetImage|endswith: '\explorer.exe'
+  filter_signed:
+    SourceImageSigned: 'true'
+  filter_system:
+    SourceImage|startswith:
+      - 'C:\Windows\System32\'
+      - 'C:\Windows\SysWOW64\'
+  condition: selection and not (filter_signed or filter_system)
+fields:
+  - SourceImage
+  - TargetImage
+  - SourceUser
+  - TargetUser
+falsepositives:
+  - Legitimate shell extensions injecting into explorer
+level: high
+---
+title: Oxide Stage 3 Remote Process Memory Access
+id: f2a3b4c5-d6e7-f8a9-b0c1-d2e3f4a5b6c7
+status: experimental
+description: |
+  Detects process access with VM_WRITE and VM_OPERATION rights to explorer.exe,
+  indicative of process injection preparation.
+references:
+  - https://github.com/diemoeve/oxide-loader
+  - https://attack.mitre.org/techniques/T1055/
+author: diemoeve
+date: 2026/04/10
+tags:
+  - attack.defense_evasion
+  - attack.t1055
+logsource:
+  category: process_access
+  product: windows
+detection:
+  selection:
+    TargetImage|endswith: '\explorer.exe'
+    GrantedAccess|contains:
+      - '0x1F0FFF'  # PROCESS_ALL_ACCESS
+      - '0x1FFFFF'  # Full access
+      - '0x1F3FFF'  # Common injection access mask
+  filter_self:
+    SourceImage|endswith: '\explorer.exe'
+  filter_system:
+    SourceImage|startswith:
+      - 'C:\Windows\System32\'
+      - 'C:\Program Files\'
+  condition: selection and not (filter_self or filter_system)
+fields:
+  - SourceImage
+  - TargetImage
+  - GrantedAccess
+  - User
+falsepositives:
+  - Accessibility tools
+  - Some legitimate automation software
+level: medium
+---
+title: Oxide Stage 3 Linux memfd_create Syscall
+id: a3b4c5d6-e7f8-a9b0-c1d2-e3f4a5b6c7d8
+status: experimental
+description: |
+  Detects memfd_create syscall which is used for fileless execution.
+  The syscall creates an anonymous memory-backed file for payload execution.
+references:
+  - https://github.com/diemoeve/oxide-loader
+  - https://attack.mitre.org/techniques/T1055/
+author: diemoeve
+date: 2026/04/10
+tags:
+  - attack.defense_evasion
+  - attack.t1055
+logsource:
+  category: syscall
+  product: linux
+detection:
+  selection:
+    syscall: 'memfd_create'
+  filter_known:
+    exe|contains:
+      - '/usr/lib/'
+      - '/usr/bin/'
+  condition: selection and not filter_known
+fields:
+  - exe
+  - comm
+  - uid
+falsepositives:
+  - Some legitimate applications use memfd for IPC
+  - Container runtimes
+level: medium
+---
+title: Oxide Stage 3 Process Execution from memfd
+id: b4c5d6e7-f8a9-b0c1-d2e3-f4a5b6c7d8e9
+status: experimental
+description: |
+  Detects execve syscall with path pointing to /proc/self/fd/,
+  which indicates fileless execution via memfd.
+references:
+  - https://github.com/diemoeve/oxide-loader
+author: diemoeve
+date: 2026/04/10
+tags:
+  - attack.defense_evasion
+  - attack.t1055
+logsource:
+  category: syscall
+  product: linux
+detection:
+  selection:
+    syscall: 'execve'
+    a0|contains: '/proc/self/fd/'
+  condition: selection
+fields:
+  - exe
+  - comm
+  - a0
+  - uid
+falsepositives:
+  - Very rare in legitimate software
+level: critical
+---
+title: Oxide Stage 3 Sysmon EID 8 Remote Thread
+id: c5d6e7f8-a9b0-c1d2-e3f4-a5b6c7d8e9f0
+status: experimental
+description: |
+  Detects Sysmon Event ID 8 (CreateRemoteThread) from small unsigned binaries.
+  Stage 3 is typically small and unsigned, making this a high-fidelity indicator.
+references:
+  - https://github.com/diemoeve/oxide-loader
+author: diemoeve
+date: 2026/04/10
+tags:
+  - attack.defense_evasion
+  - attack.t1055.002
+logsource:
+  product: windows
+  service: sysmon
+  definition: Sysmon Event ID 8 - CreateRemoteThread
+detection:
+  selection:
+    EventID: 8
+  filter_signed:
+    SourceImageSigned: 'true'
+  filter_size:
+    SourceImageSize|gt: 5000000  # > 5MB
+  filter_system:
+    SourceImage|startswith: 'C:\Windows\'
+  condition: selection and not (filter_signed or filter_size or filter_system)
+fields:
+  - SourceImage
+  - TargetImage
+  - StartAddress
+  - StartFunction
+  - NewThreadId
+falsepositives:
+  - Some legitimate software performs remote thread creation
+level: high

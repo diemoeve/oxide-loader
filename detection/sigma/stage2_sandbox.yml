@@ -1,0 +1,138 @@
+title: Oxide Stage 2 Process Enumeration
+id: a6b7c8d9-0e1f-2a3b-4c5d-6e7f8a9b0c1d
+status: experimental
+description: |
+  Detects CreateToolhelp32Snapshot calls followed by process enumeration,
+  commonly used by malware to check process count for sandbox detection.
+references:
+  - https://github.com/diemoeve/oxide-loader
+  - https://evasions.checkpoint.com/techniques/processes.html
+author: diemoeve
+date: 2026/04/10
+tags:
+  - attack.defense_evasion
+  - attack.t1497.001  # System Checks
+  - attack.t1057      # Process Discovery
+logsource:
+  category: api_call
+  product: windows
+detection:
+  selection_snapshot:
+    ApiCall: 'CreateToolhelp32Snapshot'
+    dwFlags|contains: 'TH32CS_SNAPPROCESS'
+  selection_enum:
+    ApiCall:
+      - 'Process32First'
+      - 'Process32FirstW'
+      - 'Process32Next'
+      - 'Process32NextW'
+  timeframe: 5s
+  condition: selection_snapshot and selection_enum
+fields:
+  - Image
+  - User
+falsepositives:
+  - Task managers
+  - System monitoring tools
+  - Security software
+level: low
+---
+title: Oxide Stage 2 Sandbox Username Detection
+id: b7c8d9e0-1f2a-3b4c-5d6e-7f8a9b0c1d2e
+status: experimental
+description: |
+  Detects process execution by users with suspicious usernames commonly
+  used in sandbox environments (sandbox, malware, test, etc.).
+references:
+  - https://github.com/diemoeve/oxide-loader
+author: diemoeve
+date: 2026/04/10
+tags:
+  - attack.defense_evasion
+  - attack.t1497.001
+logsource:
+  category: process_creation
+  product: windows
+detection:
+  selection:
+    User|contains:
+      - 'sandbox'
+      - 'malware'
+      - 'virus'
+      - 'sample'
+      - 'cuckoo'
+      - 'analysis'
+  condition: selection
+fields:
+  - Image
+  - CommandLine
+  - User
+  - ParentImage
+falsepositives:
+  - Actual sandbox analysis (expected behavior)
+level: informational
+---
+title: Oxide Stage 2 Window Count Check
+id: c8d9e0f1-2a3b-4c5d-6e7f-8a9b0c1d2e3f
+status: experimental
+description: |
+  Detects EnumWindows API calls, which can be used to count visible windows
+  as a sandbox detection technique (sandboxes often have few windows).
+references:
+  - https://github.com/diemoeve/oxide-loader
+  - https://evasions.checkpoint.com/techniques/generic-os-queries.html
+author: diemoeve
+date: 2026/04/10
+tags:
+  - attack.defense_evasion
+  - attack.t1497.001
+logsource:
+  category: api_call
+  product: windows
+detection:
+  selection:
+    ApiCall: 'EnumWindows'
+  filter_known:
+    Image|endswith:
+      - '\explorer.exe'
+      - '\dwm.exe'
+      - '\taskmgr.exe'
+  condition: selection and not filter_known
+fields:
+  - Image
+  - User
+falsepositives:
+  - Window management utilities
+  - Accessibility software
+level: low
+---
+title: Oxide Stage 2 Exit After Environment Checks
+id: d9e0f1a2-3b4c-5d6e-7f8a-9b0c1d2e3f4a
+status: experimental
+description: |
+  Detects process termination shortly after VM/sandbox detection activity,
+  indicative of malware that aborts execution in analysis environments.
+references:
+  - https://github.com/diemoeve/oxide-loader
+author: diemoeve
+date: 2026/04/10
+tags:
+  - attack.defense_evasion
+  - attack.t1497.001
+logsource:
+  category: process_termination
+  product: windows
+detection:
+  selection:
+    EventType: 'ProcessTerminate'
+  # This requires correlation with previous VM check events
+  # In practice, would need a SIEM correlation rule
+  condition: selection
+fields:
+  - Image
+  - ProcessId
+  - ExitCode
+  - User
+falsepositives:
+  - Normal process exits
+level: informational
