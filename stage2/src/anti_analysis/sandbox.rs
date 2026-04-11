@@ -113,11 +113,14 @@ fn get_process_count() -> usize {
 #[cfg(windows)]
 fn get_process_count_windows() -> usize {
     use windows::Win32::System::Diagnostics::ToolHelp::*;
-    use windows::Win32::Foundation::INVALID_HANDLE_VALUE;
 
     unsafe {
-        let snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-        if snapshot == INVALID_HANDLE_VALUE {
+        let snapshot = match CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) {
+            Ok(h) => h,
+            Err(_) => return 0,
+        };
+
+        if snapshot.is_invalid() {
             return 0;
         }
 
@@ -134,7 +137,7 @@ fn get_process_count_windows() -> usize {
             }
         }
 
-        windows::Win32::Foundation::CloseHandle(snapshot);
+        let _ = windows::Win32::Foundation::CloseHandle(snapshot);
         count
     }
 }

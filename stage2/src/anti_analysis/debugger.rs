@@ -55,26 +55,28 @@ fn check_is_debugger_present() -> bool {
 fn check_peb_being_debugged() -> bool {
     #[cfg(target_arch = "x86_64")]
     {
-        let being_debugged: u8;
+        let being_debugged: u32;
         unsafe {
             // PEB is at gs:[0x60], BeingDebugged is at offset 0x2
             std::arch::asm!(
                 "mov rax, gs:[0x60]",
-                "movzx {0}, byte ptr [rax + 0x2]",
+                "movzx {0:e}, byte ptr [rax + 0x2]",
                 out(reg) being_debugged,
+                out("rax") _,
             );
         }
         being_debugged != 0
     }
     #[cfg(target_arch = "x86")]
     {
-        let being_debugged: u8;
+        let being_debugged: u32;
         unsafe {
             // PEB is at fs:[0x30], BeingDebugged is at offset 0x2
             std::arch::asm!(
                 "mov eax, fs:[0x30]",
-                "movzx {0}, byte ptr [eax + 0x2]",
+                "movzx {0:e}, byte ptr [eax + 0x2]",
                 out(reg) being_debugged,
+                out("eax") _,
             );
         }
         being_debugged != 0

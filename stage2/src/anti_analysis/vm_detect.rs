@@ -143,7 +143,7 @@ fn check_mac_prefixes_windows() -> Option<String> {
         let mut buffer = vec![0u8; buf_len as usize];
         let adapter_info = buffer.as_mut_ptr() as *mut IP_ADAPTER_INFO;
 
-        if GetAdaptersInfo(Some(adapter_info), &mut buf_len).is_err() {
+        if GetAdaptersInfo(Some(adapter_info), &mut buf_len) != 0 {
             return None;
         }
 
