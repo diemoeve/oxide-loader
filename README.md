@@ -52,3 +52,11 @@ detection/
 ```
 
 ATT&CK: T1105, T1497, T1055, T1027.
+
+---
+
+## Related
+
+- [oxide](https://github.com/diemoeve/oxide) - Implant + C2 panel
+- [oxide-stealer](https://github.com/diemoeve/oxide-stealer) - Browser credential extraction
+- [oxide-infra](https://github.com/diemoeve/oxide-infra) - Lab infrastructure (Terraform + Ansible)
