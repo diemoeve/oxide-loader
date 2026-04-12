@@ -31,3 +31,14 @@ Thumbs.db
 .env
 *.pem
 *.key
+
+# Build output
+/build/
+stage1/build/
+
+# Encrypted payloads
+*.enc
+
+# Claude Code
+.claude/
+CLAUDE.md
