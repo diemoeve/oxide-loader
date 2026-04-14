@@ -15,7 +15,9 @@
 #include <winhttp.h>
 #include <stdio.h>
 
+#ifdef _MSC_VER
 #pragma comment(lib, "winhttp.lib")
+#endif
 
 #define MAX_RESPONSE (10 * 1024 * 1024)  /* 10MB max */
 
