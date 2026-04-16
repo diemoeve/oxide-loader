@@ -124,6 +124,11 @@ pub fn map_pe_into(process: HANDLE, payload: &[u8]) -> Result<*mut u8, Injection
 
             // Find file offset of .reloc data.
             let reloc_file_off = rva_to_file_offset(&pe.sections, reloc_rva);
+            // A PE with no .reloc section has no relocation data and cannot be relocated.
+            // We silently skip in that case — the caller should have allocated at preferred_base
+            // (delta == 0), but if allocation at preferred_base failed and delta != 0, the
+            // mapping will have unresolved absolute addresses. This is an acceptable limitation
+            // for images compiled with /FIXED or stripped reloc data.
             if let Some(off) = reloc_file_off {
                 let reloc_data = match payload.get(off..off + reloc_size) {
                     Some(d) => d,
@@ -185,8 +190,14 @@ pub fn map_pe_into(process: HANDLE, payload: &[u8]) -> Result<*mut u8, Injection
         }
         let addr = unsafe { remote_base.add(va) };
         let mut old_prot: PAGE_PROTECTION_FLAGS = 0;
-        unsafe {
-            VirtualProtectEx(process, addr as *const _, vsize, prot, &mut old_prot);
+        let ok = unsafe {
+            VirtualProtectEx(process, addr as *const _, vsize, prot, &mut old_prot)
+        };
+        if ok == 0 {
+            bail!(InjectionError::AllocFailed(format!(
+                "VirtualProtectEx failed for section at {:#x}",
+                addr as usize
+            )));
         }
     }
 
@@ -323,6 +334,10 @@ fn apply_base_relocations(
     Ok(())
 }
 
+// IAT patching strategy: resolve VAs in the injector process and write them to the
+// target's IAT. Valid because Windows ASLR uses the same DLL base across all
+// processes within a boot session (shared image sections). If the target has already
+// loaded the DLL at a different base, this will produce wrong pointers.
 /// Resolve a single import to its virtual address in the current process.
 /// Returns None if the import cannot be resolved (library or symbol missing).
 fn resolve_import(imp: &goblin::pe::import::Import<'_>) -> Option<u64> {
