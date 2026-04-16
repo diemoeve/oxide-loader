@@ -15,6 +15,9 @@ pub(crate) mod winapi;
 #[cfg(windows)]
 pub mod windows;
 
+#[cfg(windows)]
+pub mod pe_map;
+
 #[cfg(unix)]
 pub mod linux;
 
