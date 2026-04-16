@@ -19,6 +19,7 @@ pub enum InjectionError {
     #[error("write failed: {0}")]          WriteFailed(String),
     #[error("thread op failed: {0}")]      ThreadFailed(String),
     #[error("run failed: {0}")]            RunFailed(String),
+    #[allow(dead_code)]
     #[error("not implemented: {0}")]       NotImplemented(String),
 }
 
