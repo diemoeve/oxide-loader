@@ -21,6 +21,9 @@ pub mod pe_map;
 #[cfg(windows)]
 pub mod wth;
 
+#[cfg(windows)]
+pub mod hollow;
+
 pub mod stub;
 
 #[cfg(unix)]

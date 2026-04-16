@@ -20,6 +20,7 @@ goblin = { version = "0.8", default-features = false, features = ["pe64", "std"]
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.59", features = [
     "Win32_Foundation",
+    "Win32_Security",
     "Win32_System_Threading",
     "Win32_System_Memory",
     "Win32_System_Diagnostics_ToolHelp",
