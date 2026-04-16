@@ -10,6 +10,9 @@
 //! - auditd: memfd_create syscall
 
 #[cfg(windows)]
+pub(crate) mod winapi;
+
+#[cfg(windows)]
 pub mod windows;
 
 #[cfg(unix)]
