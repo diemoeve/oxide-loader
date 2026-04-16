@@ -18,6 +18,8 @@ pub mod windows;
 #[cfg(windows)]
 pub mod pe_map;
 
+pub mod stub;
+
 #[cfg(unix)]
 pub mod linux;
 
