@@ -21,6 +21,6 @@ fn drop_to_disk(payload: &[u8]) -> Result<(), InjectionError> {
     std::fs::write(&p, payload).map_err(|e| InjectionError::WriteFailed(e.to_string()))?;
     std::process::Command::new(&p)
         .spawn()
-        .map_err(|e| InjectionError::ThreadFailed(e.to_string()))?;
+        .map_err(|e| InjectionError::RunFailed(e.to_string()))?;
     Ok(())
 }
