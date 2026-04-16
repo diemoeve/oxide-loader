@@ -118,7 +118,7 @@ pub fn inject(payload: &[u8]) -> Result<(), InjectionError> {
         VirtualAllocEx(
             proc,
             core::ptr::null(),
-            85,
+            stub_bytes.len(),
             MEM_COMMIT | MEM_RESERVE,
             PAGE_READWRITE,
         )
@@ -134,11 +134,11 @@ pub fn inject(payload: &[u8]) -> Result<(), InjectionError> {
             proc,
             stub_mem,
             stub_bytes.as_ptr() as *const _,
-            85,
+            stub_bytes.len(),
             &mut written,
         )
     };
-    if ok == 0 || written != 85 {
+    if ok == 0 || written != stub_bytes.len() {
         return Err(InjectionError::WriteFailed(
             "WriteProcessMemory stub failed".into(),
         ));
@@ -146,7 +146,7 @@ pub fn inject(payload: &[u8]) -> Result<(), InjectionError> {
 
     // Step 11: flip stub memory to PAGE_EXECUTE_READ.
     let mut old: u32 = 0;
-    let ok = unsafe { VirtualProtectEx(proc, stub_mem, 85, PAGE_EXECUTE_READ, &mut old) };
+    let ok = unsafe { VirtualProtectEx(proc, stub_mem, stub_bytes.len(), PAGE_EXECUTE_READ, &mut old) };
     if ok == 0 {
         return Err(InjectionError::AllocFailed(
             "VirtualProtectEx stub failed".into(),
