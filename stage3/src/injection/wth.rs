@@ -78,13 +78,13 @@ pub fn inject(payload: &[u8]) -> Result<(), InjectionError> {
 
     // Step 5: resolve CreateThread VA in target (same VA as in injector — ASLR is
     // boot-session-wide for shared DLL sections).
-    let k32 = unsafe { GetModuleHandleA(b"kernel32.dll\0".as_ptr()) };
+    let k32 = unsafe { GetModuleHandleA(c"kernel32.dll".as_ptr().cast()) };
     if k32.is_null() {
         return Err(InjectionError::ThreadFailed(
             "GetModuleHandleA kernel32 failed".into(),
         ));
     }
-    let ct_va = unsafe { GetProcAddress(k32, b"CreateThread\0".as_ptr()) }
+    let ct_va = unsafe { GetProcAddress(k32, c"CreateThread".as_ptr().cast()) }
         .map(|f| f as usize as u64)
         .ok_or_else(|| InjectionError::ThreadFailed("GetProcAddress CreateThread failed".into()))?;
 

@@ -32,7 +32,7 @@ pub fn run_fileless(payload: &[u8]) -> Result<(), InjectionError> {
 
     // Execute via /proc/self/fd/
     exec_memfd(fd)
-        .map_err(|e| InjectionError::ExecFailed(e))?;
+        .map_err(|e| InjectionError::RunFailed(e))?;
 
     // Should not reach here if exec succeeds
     Ok(())

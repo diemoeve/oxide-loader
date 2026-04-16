@@ -55,7 +55,7 @@ pub fn inject(payload: &[u8]) -> Result<(), InjectionError> {
             CREATE_SUSPENDED,
             null(),
             null(),
-            &mut si,
+            &si,
             &mut pi,
         )
     };

