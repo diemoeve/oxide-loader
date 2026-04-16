@@ -1,5 +1,4 @@
-//! Undocumented NT API declarations for WTH and process hollowing.
-#![cfg(windows)]
+//! Undocumented NT API declarations for Waiting Thread Hijacking (WTH) and process hollowing.
 #![allow(non_snake_case, dead_code)]
 
 use windows_sys::Win32::Foundation::HANDLE;
@@ -39,8 +38,8 @@ impl OBJECT_ATTRIBUTES {
 
 #[repr(C)]
 pub struct CLIENT_ID {
-    pub UniqueProcess: usize,
-    pub UniqueThread: usize,
+    pub UniqueProcess: HANDLE,
+    pub UniqueThread: HANDLE,
 }
 
 extern "system" {
