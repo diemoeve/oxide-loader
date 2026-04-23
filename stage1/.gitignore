@@ -1,3 +1,12 @@
 build/
 tests/test_hash
 tests/test_xs
+tests/test_ssn
+
+# S34 signing material -- lab CA + code-signing private keys.
+# NEVER commit .key / .csr; public .crt not committed either (regen locally).
+sign-cert/
+*.key
+*.csr
+*.p12
+*.pfx

