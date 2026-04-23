@@ -1,0 +1,105 @@
+title: Oxide Stage 1 Minimal IAT Image Load
+id: 7c3e1d9a-2b5f-4c8e-9a6d-3f4b5c6d7e8a
+status: experimental
+description: |
+  Detects the S33 refactor of Oxide Stage 1: an ImageLoad event for a
+  small PE whose import table is empty or contains only ExitProcess.
+  Legitimate applications almost always import KERNEL32 + USER32 at a
+  minimum; a near-empty IAT combined with a small file size is a strong
+  signal of runtime API resolution via PEB walk (T1027.007).
+references:
+  - https://github.com/diemoeve/oxide-loader
+  - https://attack.mitre.org/techniques/T1027/007/
+author: diemoeve
+date: 2026/04/23
+tags:
+  - attack.defense_evasion
+  - attack.t1027.007  # Dynamic API Resolution
+  - attack.t1106      # Native API
+logsource:
+  category: image_load
+  product: windows
+  definition: |
+    Requires Sysmon config that logs ImageLoad (Event ID 7) with full
+    module path and hash. The IAT inspection itself is not directly
+    available in Sysmon 7 — this rule is intended as a post-hoc hunt
+    template: the SIEM must enrich loaded-image metadata with IAT size
+    / import count (e.g. via a sidecar scanner on write-to-disk events).
+detection:
+  selection:
+    EventID: 7
+    Image|endswith: '.exe'
+  filter_size:
+    # Post-enrichment field: PE on-disk size. Suppress anything over 32KB
+    # (typical for installer stubs and legitimate tiny utilities).
+    ImageSize|lte: 32768
+  filter_iat:
+    # Post-enrichment field: number of imported DLLs. Stage1 target = 0 or 1.
+    # Legitimate small PEs virtually always import at least KERNEL32 + one more.
+    ImportedDllCount|lte: 1
+  condition: selection and filter_size and filter_iat
+fields:
+  - Image
+  - ImageSize
+  - ImportedDllCount
+  - Hashes
+  - User
+  - ProcessGuid
+falsepositives:
+  - Packed binaries whose on-disk IAT is stripped by the packer (UPX,
+    VMProtect, Themida). Chain with subsequent network_connection or
+    process_creation events for confirmation.
+  - Tiny utility EXEs from legitimate vendors that use direct syscalls
+    or custom PE stubs. These should be rare in enterprise fleets and
+    can be allowlisted by SHA-256.
+  - Rust / Go release PEs that occasionally ship with stripped imports
+    via freestanding crt. Allowlist by signer or hash.
+level: medium
+---
+title: Oxide Stage 1 PEB Walk Follow-on Network
+id: 8d4f2e0b-3c6a-5d9f-0b7e-4a5c6d7e8f9b
+status: experimental
+description: |
+  Correlation rule: a process that matches Oxide_Stage1_PEB_Walk_x64
+  (YARA) subsequently initiates an outbound HTTP fetch. Fires only when
+  the same Image has both an image_load with minimal IAT and an outbound
+  connection within 10 seconds.
+references:
+  - https://github.com/diemoeve/oxide-loader
+  - detection/yara/stage1_peb_walk.yar
+author: diemoeve
+date: 2026/04/23
+tags:
+  - attack.command_and_control
+  - attack.t1027.007
+  - attack.t1071.001
+logsource:
+  category: network_connection
+  product: windows
+detection:
+  selection_net:
+    EventID: 3
+    Initiated: 'true'
+    DestinationPort:
+      - 80
+      - 443
+      - 8080
+  filter_known_browser:
+    Image|endswith:
+      - '\chrome.exe'
+      - '\firefox.exe'
+      - '\msedge.exe'
+      - '\svchost.exe'
+  # Temporal correlation to a minimal-IAT image_load event is SIEM-specific;
+  # in Splunk: `| transaction Image maxspan=10s` across EventID 7 + 3 with
+  # ImportedDllCount<=1. Shown here as the network selector only.
+  condition: selection_net and not filter_known_browser
+fields:
+  - Image
+  - DestinationIp
+  - DestinationPort
+  - ProcessGuid
+falsepositives:
+  - Any unsigned small utility that makes HTTP calls. Require
+    correlation with the image_load half of the pair in the SIEM.
+level: low
