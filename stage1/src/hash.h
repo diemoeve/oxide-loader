@@ -66,4 +66,8 @@ static inline uint32_t djb2i_wide(const uint16_t *s, size_t max_chars) {
 #define H_INTERNETREADFILE   0x24b4cfaau
 #define H_INTERNETCLOSEHANDLE 0xf7cf8d82u
 
+/* ntdll exports used by Hell's Hall (S34). */
+#define H_NT_ALLOC_VM        0x83ffec22u  /* NtAllocateVirtualMemory */
+#define H_NT_PROTECT_VM      0x10a4db54u  /* NtProtectVirtualMemory  */
+
 #endif /* HASH_H */

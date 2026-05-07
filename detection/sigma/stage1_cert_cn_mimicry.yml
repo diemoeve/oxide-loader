@@ -1,0 +1,86 @@
+title: Stage1 Authenticode Signer CN Vendor Mimicry
+id: 4f5a7c1e-6d34-4a9b-b8a8-4b1e9d02c710
+status: experimental
+description: |
+    Detects execution of a PE whose Authenticode signer CommonName contains
+    a niche OEM vendor substring (Realtek, Synaptics, Dell, HP, Conexant)
+    but whose signer certificate root issuer is NOT one of the commonly
+    trusted commercial code-signing roots (Microsoft, DigiCert, Entrust,
+    Sectigo, GlobalSign). A legitimate OEM utility from those vendors is
+    signed by a commercial CA that chains to one of those roots; a
+    self-signed or locally-issued certificate using vendor-named CN is a
+    masquerading pattern (oxide-loader S34 self-signs with
+    "CN=Oxide Labs Code Signing" but the VERSIONINFO mimics Realtek --
+    this rule catches the CN/VERSIONINFO/issuer mismatch on a real host).
+references:
+    - https://attack.mitre.org/techniques/T1036/001/
+    - https://labs.withsecure.com/publications/masquerading-as-a-windows-system-binary-using-digital-signatures
+    - internal://oxide-loader/S34
+author: diemoeve
+date: 2026-04-23
+tags:
+    - attack.defense-evasion
+    - attack.t1036.001
+logsource:
+    product: windows
+    category: process_creation
+detection:
+    # Sysmon Event ID 1 provides Signature, SignatureStatus, OriginalFileName,
+    # Company. We key on the combination:
+    #   - VERSIONINFO claims a niche OEM vendor  AND
+    #   - Image is signed                        AND
+    #   - Signer CN/OU contains that vendor      AND
+    #   - Signer issuer is NOT in the trusted commercial root list
+    sel_vendor_versioninfo:
+        Company|contains:
+            - 'Realtek'
+            - 'Synaptics'
+            - 'Dell Inc'
+            - 'Hewlett-Packard'
+            - 'HP Inc'
+            - 'Conexant'
+    sel_signature_present:
+        SignatureStatus|contains:
+            - 'Valid'
+            - 'Unverified'
+            - 'HashMismatch'
+    sel_issuer_not_commercial:
+        # Signer field is typically "CN=X, O=Y" on Sysmon; issuer is
+        # normalized by Sysmon to the chain root.
+        Signer|contains:
+            - 'Realtek'
+            - 'Synaptics'
+            - 'Dell'
+            - 'HP'
+            - 'Conexant'
+    filter_trusted_root:
+        # When the signer CN matches vendor but the signer chain root IS
+        # one of the trusted commercial CAs, suppress. (Sysmon field
+        # naming varies; Signer here includes the full chain string on
+        # many Sysmon configurations.)
+        Signer|contains:
+            - 'Microsoft Code Signing'
+            - 'Microsoft Corporation'
+            - 'DigiCert'
+            - 'Entrust'
+            - 'Sectigo'
+            - 'GlobalSign'
+            - 'VeriSign'
+            - 'Symantec'
+            - 'USERTrust'
+    condition: sel_vendor_versioninfo and sel_signature_present and sel_issuer_not_commercial and not filter_trusted_root
+fields:
+    - Image
+    - OriginalFileName
+    - Company
+    - Signer
+    - SignatureStatus
+    - Hashes
+falsepositives:
+    - Genuine OEM utilities during signing CA rollover (rare; check
+      Hashes against VT + vendor repositories).
+    - In-house enterprise rebuilds of OEM driver utilities with internal
+      PKI (check hostname pattern / Sysmon Integrity Level context).
+    - Lab environments running signed-by-lab-CA OEM-impersonation
+      artifacts (the very case this rule targets -- not an FP).
+level: medium

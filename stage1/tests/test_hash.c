@@ -39,6 +39,10 @@ int main(void) {
     check("wininet.dll",         H_WININET_DLL);
     check("ntdll.dll",           H_NTDLL_DLL);
 
+    /* S34 Nt* exports (Hell's Hall). */
+    check("NtAllocateVirtualMemory", H_NT_ALLOC_VM);
+    check("NtProtectVirtualMemory",  H_NT_PROTECT_VM);
+
     /* Case-insensitivity sanity check */
     check("KERNEL32.DLL",        H_KERNEL32_DLL);
     check("kErNeL32.DlL",        H_KERNEL32_DLL);
