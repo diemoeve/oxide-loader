@@ -9,8 +9,10 @@
  * At runtime, `xs_decode` unscrambles into a caller-owned stack buffer.
  * `xs_wipe` zeros the buffer before the scope exits.
  *
- * Key is static per-byte (XS_K + position). Sufficient for static-analysis
- * obfuscation; not designed for live-memory forensics.
+ * S35 polymorphic key: a 32-byte rotating window declared in xs_seed.h
+ * (regenerated per build by crypter/packer/xs_seed_gen.py). Each build
+ * sees a different XS_SEED, so every encrypted-byte sequence in .rodata
+ * differs across builds while the XE/xs_decode contract stays identical.
  */
 
 #ifndef XOR_STRING_H
@@ -19,15 +21,15 @@
 #include <stdint.h>
 #include <stddef.h>
 
-/* Per-byte key: base + position. */
-#define XS_K 0x5A
+#include "xs_seed.h"
 
 /*
  * Constant-foldable encoder. Evaluates to one encrypted byte at compile
- * time. Use in `static volatile const unsigned char foo_enc[] = { ... };`
+ * time when XS_SEED is `static const` in the consuming translation unit.
+ * Use in `static volatile const unsigned char foo_enc[] = { ... };`
  * initializers.
  */
-#define XE(c, i) ((unsigned char)((unsigned char)(c) ^ (unsigned char)(XS_K + (i))))
+#define XE(c, i) ((unsigned char)((unsigned char)(c) ^ (unsigned char)(XS_SEED[(i) & 31] + (i))))
 
 /*
  * Decode `n` bytes from `enc` into `out`. `out` must have capacity >= n.
