@@ -1,0 +1,22 @@
+/*
+ * Sample XS_SEED for builds without the polymorphic packer.
+ *
+ * Real builds use crypter/packer/xs_seed_gen.py to regenerate this header
+ * with a per-build seed. The seed below (all S33-compatible 0x5A bytes)
+ * preserves the original S33 string-encryption contract for plain
+ * `make windows` invocations that don't go through release-poly.
+ *
+ * If src/xs_seed.h is missing, the Makefile copies this file in.
+ */
+
+#ifndef XS_SEED_H
+#define XS_SEED_H
+
+static const unsigned char XS_SEED[32] = {
+    0x5a, 0x5a, 0x5a, 0x5a, 0x5a, 0x5a, 0x5a, 0x5a,
+    0x5a, 0x5a, 0x5a, 0x5a, 0x5a, 0x5a, 0x5a, 0x5a,
+    0x5a, 0x5a, 0x5a, 0x5a, 0x5a, 0x5a, 0x5a, 0x5a,
+    0x5a, 0x5a, 0x5a, 0x5a, 0x5a, 0x5a, 0x5a, 0x5a,
+};
+
+#endif /* XS_SEED_H */

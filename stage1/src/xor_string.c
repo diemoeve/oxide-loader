@@ -5,7 +5,7 @@
 __attribute__((noinline))
 void xs_decode(const volatile unsigned char *enc, char *out, size_t n) {
     for (size_t i = 0; i < n; i++) {
-        out[i] = (char)((unsigned char)enc[i] ^ (unsigned char)(XS_K + i));
+        out[i] = (char)((unsigned char)enc[i] ^ (unsigned char)(XS_SEED[i & 31] + i));
     }
 }
 

