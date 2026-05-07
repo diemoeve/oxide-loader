@@ -1,74 +1,125 @@
-title: Oxide Stage 1 Minimal IAT Image Load
+title: Oxide Stage 1 Decoy Common-Utility IAT Shape
 id: 7c3e1d9a-2b5f-4c8e-9a6d-3f4b5c6d7e8a
 status: experimental
 description: |
-  Detects the S33 refactor of Oxide Stage 1: an ImageLoad event for a
-  small PE whose import table is empty or contains only ExitProcess.
-  Legitimate applications almost always import KERNEL32 + USER32 at a
-  minimum; a near-empty IAT combined with a small file size is a strong
-  signal of runtime API resolution via PEB walk (T1027.007).
+  Detects the S39 IAT-cosmetic refactor of Oxide Stage 1: a small PE
+  that imports only kernel32 with a common-utility decoy set
+  (GetCommandLineA, HeapAlloc/Free, WideCharToMultiByte,
+  SetUnhandledExceptionFilter, GetTickCount, etc.) while resolving the
+  real offensive APIs (VirtualAlloc, WinInet, Nt*) at runtime via PEB
+  walk + djb2 hashing.
+
+  Supersedes the prior S33 minimal-IAT rule, which expected a 0/1
+  import IAT. The S39 build deliberately moved into the 12-15 entry
+  range to escape that outlier signature; this rule re-targets the
+  refactor by combining import-name shape with size + DLL-set
+  constraints.
 references:
   - https://github.com/diemoeve/oxide-loader
   - https://attack.mitre.org/techniques/T1027/007/
+  - https://attack.mitre.org/techniques/T1480/
+  - detection/yara/stage1_decoy_iat_shape.yar
 author: diemoeve
-date: 2026/04/23
+date: 2026/05/07
+modified: 2026/05/07
 tags:
   - attack.defense_evasion
   - attack.t1027.007  # Dynamic API Resolution
+  - attack.t1480      # Execution Guardrails
   - attack.t1106      # Native API
 logsource:
   category: image_load
   product: windows
   definition: |
-    Requires Sysmon config that logs ImageLoad (Event ID 7) with full
-    module path and hash. The IAT inspection itself is not directly
-    available in Sysmon 7 — this rule is intended as a post-hoc hunt
-    template: the SIEM must enrich loaded-image metadata with IAT size
-    / import count (e.g. via a sidecar scanner on write-to-disk events).
+    Requires Sysmon ImageLoad (Event ID 7) enriched with a sidecar PE
+    parser that publishes ImportedDllCount, ImportedFunctionCount, and
+    ImportedDllNames / ImportedFunctionNames as searchable fields.
+    Sysmon does not natively emit these — the rule is a hunt template
+    for SIEMs that ingest a separate PE-static enrichment feed (yara-
+    forge, capa-rules sidecar, or a custom scanner on
+    file_create / image_load).
 detection:
   selection:
     EventID: 7
     Image|endswith: '.exe'
   filter_size:
-    # Post-enrichment field: PE on-disk size. Suppress anything over 32KB
-    # (typical for installer stubs and legitimate tiny utilities).
-    ImageSize|lte: 32768
-  filter_iat:
-    # Post-enrichment field: number of imported DLLs. Stage1 target = 0 or 1.
-    # Legitimate small PEs virtually always import at least KERNEL32 + one more.
-    ImportedDllCount|lte: 1
-  condition: selection and filter_size and filter_iat
+    # Small PE — the loader builds well under 16KB. Tighter than the
+    # legacy 32KB threshold to suppress the generic-installer band.
+    ImageSize|lte: 16384
+  filter_iat_shape:
+    # Single imported DLL, kernel32 only. Wininet / ws2_32 / winhttp /
+    # urlmon / ntdll absence is part of the signal — a real network-
+    # capable utility this small almost always pulls one of those in.
+    ImportedDllCount: 1
+    ImportedDllNames|contains|all:
+      - 'KERNEL32.dll'
+  filter_function_count:
+    # The decoy set sits in the 12-15 range (12 in the canonical
+    # build). Lower bound suppresses the legacy 0/1-import outliers
+    # that the old rule caught; upper bound suppresses bigger CRT-
+    # linked utilities.
+    ImportedFunctionCount|gte: 10
+    ImportedFunctionCount|lte: 18
+  filter_decoy_names:
+    # At least three of the common-utility decoy names must be
+    # present. Matches the YARA rule's `3 of` selector.
+    ImportedFunctionNames|contains|any:
+      - 'GetCommandLineA'
+      - 'GetUserDefaultLocaleName'
+      - 'GetSystemTimeAsFileTime'
+      - 'GetTickCount'
+      - 'GetCurrentProcessId'
+      - 'HeapAlloc'
+      - 'WideCharToMultiByte'
+      - 'SetUnhandledExceptionFilter'
+  filter_no_network_dlls:
+    # If any of these are present, the binary is not the IAT-shape
+    # outlier S39 produces — it imports network calls openly.
+    ImportedDllNames|contains|any:
+      - 'WININET.dll'
+      - 'WINHTTP.dll'
+      - 'WS2_32.dll'
+      - 'URLMON.dll'
+      - 'ntdll.dll'
+  condition: selection and filter_size and filter_iat_shape and filter_function_count and filter_decoy_names and not filter_no_network_dlls
 fields:
   - Image
   - ImageSize
   - ImportedDllCount
+  - ImportedDllNames
+  - ImportedFunctionCount
+  - ImportedFunctionNames
   - Hashes
   - User
   - ProcessGuid
 falsepositives:
-  - Packed binaries whose on-disk IAT is stripped by the packer (UPX,
-    VMProtect, Themida). Chain with subsequent network_connection or
-    process_creation events for confirmation.
-  - Tiny utility EXEs from legitimate vendors that use direct syscalls
-    or custom PE stubs. These should be rare in enterprise fleets and
-    can be allowlisted by SHA-256.
-  - Rust / Go release PEs that occasionally ship with stripped imports
-    via freestanding crt. Allowlist by signer or hash.
+  - Tiny non-network OEM utilities (RtkAud helpers, sysinternals
+    micro-tools) that share the common-utility kernel32 set. Chain
+    with the YARA peb-walk + djb2 prologue rule for code-pattern
+    confirmation, or allowlist by signer.
+  - Packed / VMProtect / Themida benigns whose unpacked stub happens
+    to land in the same import range. Most packers retain a non-
+    decoy set (e.g. LoadLibraryA / GetProcAddress / VirtualAlloc).
+  - Custom-stub Rust / Go release PEs with a hand-rolled CRT and a
+    small kernel32 import set. Allowlist by SHA-256 or signer.
 level: medium
 ---
-title: Oxide Stage 1 PEB Walk Follow-on Network
+title: Oxide Stage 1 Decoy IAT Follow-on Network
 id: 8d4f2e0b-3c6a-5d9f-0b7e-4a5c6d7e8f9b
 status: experimental
 description: |
-  Correlation rule: a process that matches Oxide_Stage1_PEB_Walk_x64
-  (YARA) subsequently initiates an outbound HTTP fetch. Fires only when
-  the same Image has both an image_load with minimal IAT and an outbound
-  connection within 10 seconds.
+  Correlation rule: a process that matches the YARA rule
+  Oxide_Stage1_Decoy_IAT_Shape_x64 subsequently initiates an outbound
+  HTTP fetch. Fires only when the same Image has both an image_load
+  with the decoy IAT shape and an outbound connection within 10
+  seconds.
 references:
   - https://github.com/diemoeve/oxide-loader
+  - detection/yara/stage1_decoy_iat_shape.yar
   - detection/yara/stage1_peb_walk.yar
 author: diemoeve
-date: 2026/04/23
+date: 2026/05/07
+modified: 2026/05/07
 tags:
   - attack.command_and_control
   - attack.t1027.007
@@ -90,9 +141,9 @@ detection:
       - '\firefox.exe'
       - '\msedge.exe'
       - '\svchost.exe'
-  # Temporal correlation to a minimal-IAT image_load event is SIEM-specific;
-  # in Splunk: `| transaction Image maxspan=10s` across EventID 7 + 3 with
-  # ImportedDllCount<=1. Shown here as the network selector only.
+  # Temporal correlation to the decoy-IAT image_load event is SIEM-
+  # specific; in Splunk: `| transaction Image maxspan=10s` across
+  # EventID 7 + 3, joined to the YARA hit on the loaded image.
   condition: selection_net and not filter_known_browser
 fields:
   - Image
@@ -100,6 +151,7 @@ fields:
   - DestinationPort
   - ProcessGuid
 falsepositives:
-  - Any unsigned small utility that makes HTTP calls. Require
-    correlation with the image_load half of the pair in the SIEM.
+  - Any unsigned small utility that makes outbound HTTP calls without
+    a User-Agent. Require correlation with the image_load half of the
+    pair before alerting.
 level: low

@@ -60,25 +60,55 @@ Unit test: `tests/test_hash.c` (locks in djb2 constants).
 
 ### Target IAT
 
-Goal: one import or zero. Current build: **zero imports** — the linker
-does not emit any IAT entries because nothing in our code references
-a Windows function by name at link time.
+The S33 build shipped with **zero imports** — every Windows call was
+PEB-resolved, so the linker emitted no IAT entries at all. That made
+the binary an outlier on import-count statistics (legitimate small
+PEs almost always import KERNEL32 + USER32). The S39 refactor moves
+the IAT into the **12-15 entry common-utility band**, kept entirely
+within `kernel32`, while preserving the runtime PEB-walk resolution
+for every offensive call.
+
+The decoy set (see `src/decoys.c`) is split into three tiers:
+
+- **Tier A — pure decoys.** Addresses stored in a `__attribute__((used))`
+  `void *const[]` array; the array is anchored from `decoys_run()`,
+  which keeps its `-fdata-sections` section under `--gc-sections`. The
+  linker resolves each pointer against a kernel32 import slot, but no
+  call site is ever emitted in `.text`. Members:
+  `GetCommandLineA`, `GetUserDefaultLocaleName`, `HeapAlloc`,
+  `HeapFree`, `GetSystemTimeAsFileTime`, `GetCurrentThreadId`,
+  `GetModuleHandleA`.
+- **Tier B — light-touch.** Called once on a benign init path and the
+  result XORed into a volatile sink. Reads as routine startup
+  arithmetic in disassembly. Members: `GetTickCount`,
+  `GetCurrentProcessId`.
+- **Tier C — CRT-shape utility.** Discarded results from a
+  `SetUnhandledExceptionFilter(NULL)`, a throwaway
+  `WideCharToMultiByte`, and a `GetLastError` check. Adds the "looks
+  like normal CRT init" weight.
 
 ```
-$ x86_64-w64-mingw32-objdump -p build/stage1.exe | grep -A 5 "The Import"
-The Import Tables (interpreted .idata section contents)
- vma:            Hint    Time      Forward  DLL       First
-                 Table   Stamp     Chain    Name      Thunk
- 00004000       00000000 00000000 00000000 00000000 00000000
+$ x86_64-w64-mingw32-objdump -p build/stage1.exe | awk '/DLL Name:/'
+        DLL Name: KERNEL32.dll
 ```
 
-(The zero row is the import-table terminator — there are no entries.)
+12 functions are imported from a single DLL (kernel32). The offensive
+APIs — `VirtualAlloc`, `LoadLibraryA`, the `Internet*` suite, the
+two `Nt*` wrappers — are absent from the IAT and resolved at
+runtime via the PEB walk + djb2 path documented above.
 
-This is enabled by freestanding build flags in `Makefile`:
+Why kernel32-only: keeping the entire import set within kernel32
+preserves the "no network DLL, no ntdll" property that lets the
+hidden-fetch detection rule fire on the mismatch between observed
+network traffic and the binary's static surface.
+
+Freestanding build flags in `Makefile` remain:
 `-nostdlib -nodefaultlibs -nostartfiles -ffreestanding
 -Wl,--entry=stage1_entry`, plus `-fno-builtin-memcpy -fno-builtin-memset`
 to block the compiler from emitting implicit `memcpy`/`memset` calls
-on aggregate copies.
+on aggregate copies. `-Wl,--gc-sections` is still applied — the decoy
+section survives because it is reached from used code, not because GC
+is disabled.
 
 ### Verify cleanliness
 
@@ -90,9 +120,11 @@ strings build/stage1.exe | grep -iE \
   "oxide|beacon|stage|implant|c2|http://|https://|User-Agent|Mozilla|VirtualAlloc|LoadLibrary|GetProcAddress|wininet|InternetOpen|/api/"
 # -> must print nothing
 
-# 2. IAT must be empty or ExitProcess only
+# 2. IAT must be kernel32-only (no wininet / ws2_32 / ntdll)
 x86_64-w64-mingw32-objdump -p build/stage1.exe | awk '/DLL Name:/ {print}'
-# -> must print nothing, or a single "DLL Name: kernel32.dll" line
+# -> must print exactly: DLL Name: KERNEL32.dll
+# Imported function count from kernel32 is expected in 12-15 (the
+# common-utility decoy band — see "Target IAT" above).
 
 # 3. Binary under 20 KB
 stat -c %s build/stage1.exe
@@ -138,7 +170,8 @@ Every stage1 technique ships with detections in `../detection/`:
 
 | Technique             | YARA                                    | Sigma                                       |
 |-----------------------|-----------------------------------------|---------------------------------------------|
-| PEB walk + min IAT    | `stage1_peb_walk.yar` (T1027.007)       | `stage1_minimal_iat.yml` (T1027.007)        |
+| PEB walk + djb2       | `stage1_peb_walk.yar` (T1027.007)       | --                                          |
+| Decoy IAT shape       | `stage1_decoy_iat_shape.yar` (T1027.007, T1480) | `stage1_minimal_iat.yml` (T1027.007, T1480) |
 | Staging URL fetch     | `stage1_imports.yar` (legacy)           | `stage1_network.yml` (T1071.001, T1105)     |
 | XOR loop magic        | `stage1_xor.yar`, `stage1_magic.yar`    | --                                          |
 | Hell's Hall syscalls  | `stage1_hellshall_ssn_resolve.yar` (T1106, T1027.007) | --                            |
