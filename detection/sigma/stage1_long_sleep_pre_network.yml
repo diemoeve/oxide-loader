@@ -1,0 +1,125 @@
+title: Oxide Stage 1 Long Quiet Window Before Network Connect
+id: 9e5b4c2d-7f8a-4d1e-bc3f-1a2b3c4d5e6f
+status: experimental
+description: |
+  Detects the S40 anti-emulation timing-probe behavioural footprint:
+  a small unsigned-or-OEM-signed PE that, on first execution, holds a
+  quiet startup window of 7+ seconds with no outbound network
+  connection, then opens its first connection. The pattern reflects
+  the Guard 1 + Guard 2 sequence in stage1/src/anti_emu.c (Sleep(8000)
+  + ~1.5 s CPU-loop probe before resolve_apis() and the WinInet fetch).
+
+  This rule is high-FP on its own — many benign installers, OS update
+  helpers, and CRT-init utilities also delay before their first
+  outbound connection. It MUST be chained with at least one of:
+    - PE size constraint (< 14 KB signed)
+    - Signer cluster constraint (lab CA / OEM-mimic CN, not a known
+      enterprise cert authority)
+    - Parent-process constraint (spawned from explorer / cmd, not from
+      a known software-update agent)
+
+  The rule is published as a hunt template, not a high-confidence
+  alert. Tune the size / signer / parent-process filters to your
+  environment before promoting.
+
+references:
+  - https://github.com/diemoeve/oxide-loader
+  - https://attack.mitre.org/techniques/T1497/003/
+  - https://attack.mitre.org/techniques/T1480/
+  - detection/yara/stage1_qpc_sleep_divergence_check.yar
+author: diemoeve
+date: 2026/05/07
+modified: 2026/05/07
+tags:
+  - attack.defense_evasion
+  - attack.t1497.003   # Time Based Evasion
+  - attack.t1480       # Execution Guardrails
+logsource:
+  category: process_creation
+  product: windows
+  definition: |
+    Requires Sysmon Event ID 1 (process creation) AND Event ID 3
+    (network connection) on the same Image, correlated by ProcessGuid
+    over a 7-15 second window. Rule logic is expressed as a
+    correlation in SIEM query language; raw Sigma below captures the
+    components.
+detection:
+  selection_proc:
+    EventID: 1
+    Image|endswith: '.exe'
+  filter_small_pe:
+    # Stage1 builds at ~11 KB unsigned, ~13-14 KB signed (Authenticode
+    # adds the certificate table). The legitimate small-utility band
+    # tops out around 32 KB on disk for OEM helpers; the < 16384 cap
+    # mirrors the YARA rule and tightens this to the loader-class
+    # silhouette.
+    Image|filesize|lte: 16384
+  selection_net_after:
+    EventID: 3
+    Initiated: 'true'
+    DestinationPort:
+      - 80
+      - 443
+      - 8080
+  filter_known_browser:
+    Image|endswith:
+      - '\chrome.exe'
+      - '\firefox.exe'
+      - '\msedge.exe'
+      - '\svchost.exe'
+      - '\MsMpEng.exe'
+      - '\WindowsUpdate.exe'
+  filter_signed_known_oem:
+    # Allowlist any process whose Authenticode chain anchors at a
+    # known enterprise / OEM CA (DigiCert, Sectigo, GlobalSign,
+    # Microsoft, the customer's internal CA). The S40 lab build is
+    # self-signed under "Oxide Labs" (rejected by commercial roots)
+    # so this filter does NOT exempt it. Tune to your environment.
+    SignatureStatus: 'Valid'
+    Issuer|contains|any:
+      - 'DigiCert'
+      - 'Sectigo'
+      - 'GlobalSign'
+      - 'Microsoft Code Signing'
+      - 'COMODO'
+  # Correlation logic (SIEM-specific; pseudo-form below):
+  #
+  #   eventID=1 AND filter_small_pe
+  #   THEN no eventID=3 (Initiated=true) for THAT ProcessGuid for 7+ s
+  #   THEN eventID=3 (Initiated=true) within next 5 s
+  #   AND not filter_known_browser
+  #   AND not filter_signed_known_oem
+  #
+  # Splunk:
+  #   index=sysmon (EventID=1 OR EventID=3)
+  #   | transaction ProcessGuid maxspan=15s
+  #   | search EventID=1 EventID=3
+  #   | eval gap=relative_time(_time_net, _time_proc)
+  #   | search gap>=7 gap<=15 ImageSize<=16384
+  #
+  # Elastic / EQL:
+  #   sequence by process.entity_id with maxspan=15s
+  #     [process where event.action == "process_started"
+  #          and file.size <= 16384]
+  #     [network where event.action == "connection_attempted"
+  #          and network.direction == "outbound"
+  #          and process.elapsed_time >= "PT7S"]
+  condition: selection_proc and filter_small_pe and selection_net_after and not filter_known_browser and not filter_signed_known_oem
+fields:
+  - Image
+  - ImageSize
+  - ProcessGuid
+  - DestinationIp
+  - DestinationPort
+  - SignatureStatus
+  - Issuer
+  - ParentImage
+  - User
+falsepositives:
+  - Small OEM updater utilities that genuinely sleep before checking
+    for updates. Allowlist by signer cluster.
+  - Custom enterprise tools written in Rust/Go that bundle a delayed
+    health-check before phoning home. Allowlist by SHA-256 / signer.
+  - Watchdog binaries that wake on a long timer. Filter by parent
+    process == scheduled-task host.
+level: low
